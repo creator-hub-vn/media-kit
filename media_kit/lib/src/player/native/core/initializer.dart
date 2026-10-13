@@ -6,9 +6,7 @@
 import 'dart:ffi';
 
 import 'package:media_kit/generated/libmpv/bindings.dart' as generated;
-import 'package:media_kit/src/player/native/core/execmem_restriction.dart';
 import 'package:media_kit/src/player/native/core/initializer_isolate.dart';
-import 'package:media_kit/src/player/native/core/initializer_native_callable.dart';
 
 /// {@template initializer}
 ///
@@ -38,19 +36,19 @@ class Initializer {
     Future<void> Function(Pointer<generated.mpv_event>) callback, {
     Map<String, String> options = const {},
   }) async {
-    if (!isExecmemRestricted) {
-      return InitializerNativeCallable(mpv).create(callback, options: options);
-    } else {
-      return InitializerIsolate().create(callback, options: options);
-    }
+    // [mayogu] Force the isolate-based initializer. InitializerNativeCallable
+    // hands a Dart trampoline to libmpv (mpv_set_wakeup_callback) that outlives
+    // the isolate: libmpv keeps calling it after the engine is torn down, or
+    // after Player.dispose() closes it while mpv_terminate_destroy still waits
+    // its 5s delay, killing the process (SIGSEGV/SIGABRT).
+    // InitializerIsolate blocks in mpv_wait_event() and never passes a Dart
+    // pointer to libmpv. Same path upstream uses in debug (PR #1352).
+    // Refs: https://github.com/media-kit/media-kit/issues/1443
+    return InitializerIsolate().create(callback, options: options);
   }
 
   /// Disposes [Pointer<mpv_handle>].
   void dispose(Pointer<generated.mpv_handle> ctx) {
-    if (!isExecmemRestricted) {
-      InitializerNativeCallable(mpv).dispose(ctx);
-    } else {
-      InitializerIsolate().dispose(mpv, ctx);
-    }
+    InitializerIsolate().dispose(mpv, ctx);
   }
 }
